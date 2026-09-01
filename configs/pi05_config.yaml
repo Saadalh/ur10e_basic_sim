@@ -1,0 +1,46 @@
+# Local OpenPI checkout used to import the model code.
+openpi_root: /home/rahmlab/projects/vlas/openpi
+
+# Registered OpenPI configuration for the inference policy.
+config_name: pi05_droid
+
+# Pretrained checkpoint root; remote paths use OpenPI's local cache.
+checkpoint: gs://openpi-assets/checkpoints/pi05_droid
+
+# Fallback instruction when an observation has no prompt.
+default_prompt: 'Place the blue cube on top of the green cube.'
+
+# RGB image dimensions used by Isaac cameras.
+camera_width: 1280
+camera_height: 720
+
+# RGB publishers and their source camera prims.
+cameras:
+  side_camera:
+    prim_path: /World/side_cam
+    topic: /side_camera/rgb
+  wrist_camera:
+    prim_path: /World/ur10e/wrist_3_link/wrist_realsense_01/RSD455/Camera_OmniVision_OV9782_Color
+    topic: /wrist_camera/rgb
+
+# Articulation and ROS graph used to publish proprioception.
+robot_prim_path: /World/ur10e/root_joint
+joint_state_graph_path: /Graph/ROS_JointStates
+joint_state_topic: /joint_states
+
+# Joint ordering used to build the pi0.5-DROID robot state.
+arm_joint_names:
+  - shoulder_pan_joint
+  - shoulder_lift_joint
+  - elbow_joint
+  - wrist_1_joint
+  - wrist_2_joint
+  - wrist_3_joint
+gripper_joint_name: finger_joint
+
+# The DROID policy runs at 15 Hz while this simulation advances at 60 Hz.
+simulation_steps_per_action: 4
+
+# Receding-horizon execution settings.
+steps: 15
+chunk_samples: 1

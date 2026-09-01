@@ -1,0 +1,107 @@
+{
+  "paths": {
+    "usd": "ur10e_with_table.usd",
+    "camera_debug_dir": "camera_debug",
+    "lerobot_v3": ".venv/lerobot_v3",
+    "ur10e_controller": "/home/rahmlab/isaacsim/standalone_examples/api/isaacsim.robot.manipulators/ur10e",
+    "isaac_experience": "/home/rahmlab/isaacsim/apps/isaacsim.exp.base.python.kit"
+  },
+  "dataset": {
+    "root": "data",
+    "repo_id": "local/ur10e_red_on_blue",
+    "robot_type": "ur10e_robotiq_2f_85",
+    "fps": 20,
+    "files_per_chunk": 1000,
+    "data_file_size_limit_mb": 100,
+    "video_file_size_limit_mb": 200,
+    "episode_metadata_buffer_size": 10,
+    "one_file_per_episode": true,
+    "video_backend": "pyav",
+    "video_codec": "h264",
+    "streaming_encoding": true
+  },
+  "simulation": {
+    "physics_hz": 200,
+    "rendering_hz": 20,
+    "table_prim_path": "/World/Cube",
+    "cube_material_prim_path": "/World/Physics_Materials/cube_material",
+    "cube_static_friction": 1.0,
+    "cube_dynamic_friction": 1.0,
+    "cube_restitution": 0.0,
+    "settling_steps_before_recording": 30,
+    "settling_steps_after_controller": 200
+  },
+  "cameras": {
+    "width": 1280,
+    "height": 720,
+    "prim_paths": {
+      "side_camera": "/World/side_cam",
+      "wrist_camera": "/World/ur10e/wrist_3_link/wrist_realsense_01/RSD455/Camera_OmniVision_OV9782_Color"
+    }
+  },
+  "robot": {
+    "prim_path": "/World/ur10e/root_joint",
+    "end_effector_prim_path": "/World/ur10e/ee_link/Robotiq_2F_85/base_link",
+    "arm_joint_names": [
+      "shoulder_pan_joint",
+      "shoulder_lift_joint",
+      "elbow_joint",
+      "wrist_1_joint",
+      "wrist_2_joint",
+      "wrist_3_joint"
+    ],
+    "wrist_3_joint_name": "wrist_3_joint",
+    "wrist_3_preferred_position_degrees": 90.0,
+    "wrist_3_initial_rotation_range_degrees": [-90.0, 90.0],
+    "arm_initial_position_half_ranges_degrees": [45.0, 30.0, 30.0, 30.0, 20.0, 90.0],
+    "maximum_initial_pose_samples": 500,
+    "minimum_initial_tcp_y_magnitude": 0.05,
+    "minimum_base_frame_tcp_x": 0.0,
+    "minimum_base_frame_tcp_z": 0.0
+  },
+  "gripper": {
+    "joint_prim_names": ["finger_joint"],
+    "joint_opened_positions": [0.0],
+    "joint_closed_positions": [40.0],
+    "action_deltas": [-40.0],
+    "use_mimic_joints": true
+  },
+  "cubes": {
+    "size": 0.05,
+    "mass": 0.02,
+    "prim_paths": {
+      "red": "/World/red_cube",
+      "green": "/World/green_cube",
+      "blue": "/World/blue_cube"
+    },
+    "base_x_range": [0.45, 0.85],
+    "base_y_magnitude_range": [0.05, 0.40],
+    "minimum_separation": 0.20,
+    "setup_positive_y_counts": [3, 0, 2, 1]
+  },
+  "controller": {
+    "movement_speed_multiplier": 2.5,
+    "base_events_dt": [0.005, 0.002, 1.0, 0.05, 0.0008, 0.005, 0.0008, 0.1, 0.0008, 0.008],
+    "movement_event_indices": [0, 1, 4, 5, 6, 8, 9],
+    "end_effector_offset": [0.0, 0.0, 0.125],
+    "end_effector_orientation_degrees": [180.0, 0.0, 0.0],
+    "initial_height_clearance": 0.30,
+    "position_tolerance": 0.01,
+    "maximum_alignment_steps": 1000,
+    "minimum_lift_height": 0.10,
+    "maximum_placement_error": 0.02
+  },
+  "direction_offsets_base_frame": {
+    "right": [0.0, -0.25, 0.0],
+    "left": [0.0, 0.25, 0.0],
+    "forward": [0.25, 0.0, 0.0],
+    "backward": [-0.25, 0.0, 0.0]
+  },
+  "tasks": {
+    "move the red cube to the right": 1,
+    "move the red cube to the left": 1,
+    "move the red cube forward": 1,
+    "move the red cube backward": 1,
+    "stack the red cube on the blue cube": 1
+  }
+}

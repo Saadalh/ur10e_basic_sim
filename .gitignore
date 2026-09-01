@@ -1,0 +1,32 @@
+# Local Python environments
+.venv/
+venv/
+env/
+
+# Python caches and tooling output
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated robot datasets and model artifacts
+data/
+assets/
+checkpoints/
+wandb/
+
+# Runtime captures and logs
+camera_debug/
+*.log
+
+# Local editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+
+# One-off local Parquet inspection script
+/test.py
