@@ -12,8 +12,8 @@ from isaaclab.app import AppLauncher
 from src.usd_utils import expand_gripper_visual_instances
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-COLLECTION_CONFIG_PATH = PROJECT_ROOT / "ds_collect_config.json"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+COLLECTION_CONFIG_PATH = PROJECT_ROOT / "config" / "ds_collect_config.json"
 with COLLECTION_CONFIG_PATH.open(encoding="utf-8") as config_file:
     COLLECTION_CONFIG = json.load(config_file)
 

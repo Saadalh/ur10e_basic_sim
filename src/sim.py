@@ -9,7 +9,7 @@ from isaaclab.app import AppLauncher
 
 from src.usd_utils import expand_gripper_visual_instances
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "pi05_config.yaml"
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "pi05_config.yaml"
 with CONFIG_PATH.open(encoding="utf-8") as config_file:
     PI05_CONFIG = yaml.safe_load(config_file)
 

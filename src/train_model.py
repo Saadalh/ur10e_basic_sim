@@ -18,6 +18,8 @@ import numpy as np
 import pyarrow.parquet as pq
 import yaml
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 @dataclass(frozen=True)
 class Episode:
@@ -503,7 +505,7 @@ def main() -> int:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path(__file__).with_name("train_config.yaml"),
+        default=PROJECT_ROOT / "config" / "train_config.yaml",
         help="Path to the YAML training configuration.",
     )
     parser.add_argument(
