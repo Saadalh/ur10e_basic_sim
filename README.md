@@ -1,105 +1,152 @@
 # UR10e Cube Manipulation Simulation
 
-Isaac Sim/Isaac Lab simulation for collecting language-conditioned UR10e and Robotiq 2F-85 cube-manipulation demonstrations, running pi0.5-DROID inference, and launching pi0.5 fine-tuning through OpenPI.
+Tools for generating language-conditioned UR10e and Robotiq 2F-85 demonstrations in Isaac Sim, running pi0.5-DROID in the simulation, and fine-tuning pi0.5 from an existing LeRobot dataset.
 
 ## Contents
 
-- `ur10e_with_table.usd`: simulation scene.
-- `main.py` and `src/`: simulation, collection, inference, and training entry points.
+- `ur10e_with_table.usd`: Isaac Sim scene.
+- `main.py`: simulation and simulated-policy inference entry point.
 - `src/collect_cube_data.py`: configurable LeRobot v3 dataset collector.
 - `src/train_model.py`: LeRobot v3 to DROID adapter and OpenPI training launcher.
 - `config/ds_collect_config.json`: robot, camera, task, and collection settings.
 - `config/pi05_config.yaml`: pi0.5 inference settings.
 - `config/train_config.yaml`: commented pi0.5 fine-tuning settings.
 
-## Requirements
+## Choose A Use Case
 
-- Ubuntu 22.04 with a recent NVIDIA production driver.
-- Python 3.11 for Isaac Sim 5.x and the current OpenPI environment.
-- At least 16 GB of GPU VRAM for the simulation workflow.
-- More than 8 GB of GPU VRAM for pi0.5 inference.
-- At least 22.5 GB of GPU VRAM for LoRA fine-tuning or 70 GB for full fine-tuning.
+| Use case | Required | Not required |
+| --- | --- | --- |
+| Fine-tune pi0.5 from an existing dataset | OpenPI, pi0.5 checkpoint, LeRobot dataset, NVIDIA GPU | Isaac Sim, Isaac Lab, ROS 2 |
+| Validate the training dataset adapter | Python, OpenCV, PyArrow, PyYAML, LeRobot dataset | Isaac Sim, Isaac Lab, ROS 2, pi0.5 weights |
+| Generate a new simulated dataset | Isaac Sim, Isaac Lab, LeRobot v3, NVIDIA GPU | OpenPI and pi0.5 |
+| Launch or inspect the simulation | Isaac Sim, Isaac Lab, NVIDIA GPU | OpenPI and pi0.5 |
+| Run pi0.5 inference inside the simulation | Isaac Sim, Isaac Lab, Isaac Sim ROS 2 bridge, OpenPI, pi0.5-DROID checkpoint, NVIDIA GPU | Training dataset |
 
-Check the current [Isaac Sim system requirements](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/requirements.html) and [OpenPI requirements](https://github.com/Physical-Intelligence/openpi#requirements) before installation.
+Use the installation documentation linked below rather than assuming that commands or version numbers from another environment are compatible.
 
-## Install Isaac Sim And Isaac Lab
+## Existing Dataset
 
-This project imports `AppLauncher` and other APIs from Isaac Lab, so install both Isaac Sim and Isaac Lab. The commands below follow NVIDIA's recommended Isaac Sim 5.1 pip workflow on Linux. Keep the Isaac Sim and Isaac Lab versions compatible and consult the [official installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/pip_installation.html) if a newer release is available.
+An existing UR10e dataset generated with this Isaac Sim project is available from KIT bwSync&Share:
 
-Create and activate a Python 3.11 environment:
+**[Download the UR10e_Basic Isaac Sim dataset](https://bwsyncandshare.kit.edu/s/Bj8tZGxsNTBaqNY)**
 
-```bash
-python3.11 -m venv env_isaaclab
-source env_isaaclab/bin/activate
-python -m pip install --upgrade pip
+Download and extract it so the repository has the following layout:
+
+```text
+ur10e_basic_sim/
+  data/
+    meta/
+      info.json
+    data/
+    videos/
 ```
 
-Install Isaac Sim and a compatible CUDA-enabled PyTorch build:
+The downloaded dataset can be used directly by `src/train_model.py`. You do not need to install Isaac Sim or Isaac Lab when fine-tuning exclusively from this existing dataset.
 
-```bash
-pip install "isaacsim[all,extscache]==5.1.0" --extra-index-url https://pypi.nvidia.com
-pip install -U torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
-```
+## Official Installation References
 
-Verify Isaac Sim. The first launch downloads extensions and asks you to accept NVIDIA's license:
+### OpenPI And pi0.5
 
-```bash
-isaacsim
-```
+Required for fine-tuning and pi0.5 inference.
 
-Install Isaac Lab from source into the same environment:
+- [OpenPI repository, requirements, and installation](https://github.com/Physical-Intelligence/openpi)
+- [OpenPI model checkpoints](https://github.com/Physical-Intelligence/openpi#model-checkpoints)
+- [pi0.5 model overview](https://www.physicalintelligence.company/blog/pi05)
+- [`uv` installation](https://docs.astral.sh/uv/getting-started/installation/), used by OpenPI
+- [NVIDIA driver downloads](https://www.nvidia.com/en-us/drivers/)
 
-```bash
-sudo apt install cmake build-essential
-git clone https://github.com/isaac-sim/IsaacLab.git --branch main
-cd IsaacLab
-./isaaclab.sh --install none
-./isaaclab.sh -p scripts/tutorials/00_sim/create_empty.py
-```
+Clone OpenPI with its submodules and follow its current installation guide. This project uses the `pi05_droid` configuration and the checkpoint at `gs://openpi-assets/checkpoints/pi05_droid`. OpenPI downloads released checkpoints on first use and caches them under `~/.cache/openpi`; set `OPENPI_DATA_HOME` to choose another cache directory.
 
-The final command should open an empty Isaac Sim viewport. Configure the [Isaac Sim ROS 2 bridge](https://docs.isaacsim.omniverse.nvidia.com/latest/ros2_tutorials/tutorial_ros2_installation.html) before running pi0.5 inference, because this project receives camera and joint-state observations through ROS 2.
+OpenPI currently documents these approximate GPU memory requirements:
 
-## Install OpenPI And pi0.5
+| Mode | GPU memory |
+| --- | --- |
+| Inference | More than 8 GB |
+| LoRA fine-tuning | More than 22.5 GB |
+| Full fine-tuning | More than 70 GB |
 
-OpenPI contains the pi0.5 model implementation and downloads released model weights. Install `uv` by following its [official installation instructions](https://docs.astral.sh/uv/getting-started/installation/), then clone OpenPI with submodules:
+### Isaac Sim And Isaac Lab
 
-```bash
-git clone --recurse-submodules https://github.com/Physical-Intelligence/openpi.git
-cd openpi
-GIT_LFS_SKIP_SMUDGE=1 uv sync
-GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
-```
+Required only for launching the simulation, generating datasets, or evaluating a policy in the simulation.
 
-This project uses the released pi0.5-DROID checkpoint at `gs://openpi-assets/checkpoints/pi05_droid`. OpenPI downloads it automatically on first use and caches it under `~/.cache/openpi`. To download it in advance, run this from the OpenPI directory:
+- [Isaac Sim installation](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/index.html)
+- [Isaac Sim system requirements](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/requirements.html)
+- [Isaac Lab installation](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html)
+- [Isaac Lab installation using Isaac Sim pip packages](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/pip_installation.html)
 
-```bash
-uv run python -c 'from openpi.shared import download; print(download.maybe_download("gs://openpi-assets/checkpoints/pi05_droid"))'
-```
+Install mutually compatible Isaac Sim and Isaac Lab releases by following the Isaac Lab documentation. Run simulation and collection commands from the resulting Isaac Lab Python environment.
 
-Set `OPENPI_DATA_HOME` if the model cache should live somewhere other than `~/.cache/openpi`.
+### ROS 2
+
+Required only for pi0.5 inference inside Isaac Sim because `src/sim.py` receives camera images and joint states through ROS 2.
+
+- [Isaac Sim ROS 2 installation](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/install_ros.html)
+- [Isaac Sim ROS 2 tutorials](https://docs.isaacsim.omniverse.nvidia.com/latest/ros2_tutorials/index.html)
+- [ROS 2 installation documentation](https://docs.ros.org/en/jazzy/Installation.html)
+
+Use the ROS 2 version supported by the installed Isaac Sim release.
+
+### LeRobot And Dataset Utilities
+
+LeRobot v3 is required to create new datasets. The training adapter also imports OpenCV, PyArrow, and PyYAML; these should be installed in the Python environment used to run it.
+
+- [LeRobot installation](https://huggingface.co/docs/lerobot/installation)
+- [OpenCV Python packages](https://pypi.org/project/opencv-python/)
+- [PyArrow installation](https://arrow.apache.org/docs/python/install.html)
+- [PyYAML package](https://pypi.org/project/PyYAML/)
+
+OpenPI manages most training dependencies in its own environment. Follow OpenPI's dependency versions when packages overlap rather than mixing the Isaac Sim and OpenPI environments.
 
 ## Configure This Project
 
-Clone this repository and run commands from its root directory:
+Clone the repository and run commands from its root directory:
 
 ```bash
 git clone https://github.com/Saadalh/ur10e_basic_sim.git
 cd ur10e_basic_sim
 ```
 
-Update machine-specific paths before running:
+Update only the configuration relevant to the selected workflow:
 
-- `config/pi05_config.yaml`: set `openpi_root` to the OpenPI checkout.
-- `config/train_config.yaml`: set `openpi-root` to the OpenPI checkout.
-- `config/ds_collect_config.json`: set `paths.ur10e_controller` and `paths.isaac_experience` for the installed Isaac Sim version.
+- Fine-tuning: set `openpi-root` in `config/train_config.yaml` and review its dataset, output, memory, and optimization settings.
+- Simulated inference: set `openpi_root` in `config/pi05_config.yaml` and verify the checkpoint and ROS 2 topics.
+- Dataset generation: set `paths.lerobot_v3`, `paths.ur10e_controller`, and `paths.isaac_experience` in `config/ds_collect_config.json`.
 
-The collector also expects a LeRobot v3 source tree at the configured `paths.lerobot_v3` location. Dataset, camera capture, checkpoint, and asset paths are relative to the project root by default.
+Dataset, camera capture, checkpoint, and asset paths are relative to the repository root by default.
 
-## Simulation And Inference
+## Fine-Tune From An Existing Dataset
+
+Isaac Sim, Isaac Lab, and ROS 2 are not used by the training launcher.
+
+Validate the downloaded dataset without allocating the pi0.5 model:
+
+```bash
+/path/to/openpi/.venv/bin/python -m src.train_model --validate-only
+```
+
+Start fine-tuning from the OpenPI environment on a capable GPU:
+
+```bash
+/path/to/openpi/.venv/bin/python -m src.train_model
+```
+
+Set `ignore-episodes` in `config/train_config.yaml` to integer episode indexes that should not be used. An empty list keeps every episode.
+
+## Generate A Dataset In Isaac Sim
+
+Run this command from the Isaac Lab environment:
+
+```bash
+python -m src.collect_cube_data --episodes 10 --seed 42
+```
+
+Without `--episodes`, the collector records the complete weighted task schedule. Generated datasets are written to `data/`, one file per episode by default, and are intentionally excluded from Git.
+
+## Run The Simulation
 
 Run these commands from the Isaac Lab environment.
 
-Launch the simulation:
+Launch the scene without pi0.5:
 
 ```bash
 python main.py
@@ -110,32 +157,6 @@ Run pi0.5-DROID inference in the simulation:
 ```bash
 python main.py --test
 ```
-
-## Dataset Collection
-
-The collector expands configured color templates into concrete task instructions. Without `--episodes`, it records the complete weighted task schedule. With `--episodes`, it randomly selects the requested number of configured tasks.
-
-```bash
-python -m src.collect_cube_data --episodes 10 --seed 42
-```
-
-Generated datasets are written to `data/`, one file per episode by default, and are intentionally excluded from Git.
-
-## Training
-
-Validate the dataset adapter without allocating the pi0.5 model:
-
-```bash
-python -m src.train_model --validate-only
-```
-
-Start fine-tuning from the OpenPI environment on a capable GPU:
-
-```bash
-/path/to/openpi/.venv/bin/python -m src.train_model
-```
-
-Set `ignore-episodes` in `config/train_config.yaml` to a list of integer episode indexes that should not be used for training. An empty list keeps every episode.
 
 ## Local Artifacts
 
