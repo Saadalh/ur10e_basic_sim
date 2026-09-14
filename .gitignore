@@ -14,7 +14,8 @@ __pycache__/
 htmlcov/
 
 # Generated robot datasets and model artifacts
-data/
+dataset/
+data_1/
 assets/
 checkpoints/
 wandb/

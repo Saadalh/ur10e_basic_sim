@@ -18,6 +18,8 @@ import numpy as np
 import pyarrow.parquet as pq
 import yaml
 
+from src.dataset_stats import convert_controls, load_projected_stats
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -117,7 +119,7 @@ class UR10eDataset:
 
         raw_states = np.asarray([values["observation.state"][i] for i in selected], dtype=np.float32)
         raw_actions = np.asarray([values["action"][i] for i in selected], dtype=np.float32)
-        states, actions = self._convert_controls(raw_states, raw_actions, settings)
+        states, actions = convert_controls(raw_states, raw_actions, settings)
 
         side_path = self._video_path(row, info, "side_camera")
         wrist_path = self._video_path(row, info, "wrist_camera")
@@ -146,41 +148,6 @@ class UR10eDataset:
             chunk_index=int(row[f"{prefix}/chunk_index"]),
             file_index=int(row[f"{prefix}/file_index"]),
         )
-
-    @staticmethod
-    def _convert_controls(
-        raw_states: np.ndarray, raw_actions: np.ndarray, settings: dict[str, Any]
-    ) -> tuple[np.ndarray, np.ndarray]:
-        arm_state_indices = settings["arm-state-indices"]
-        arm_action_indices = settings["arm-velocity-action-indices"]
-        if raw_states.ndim != 2 or max(arm_state_indices, default=-1) >= raw_states.shape[1]:
-            raise ValueError(f"Invalid arm-state-indices for state shape {raw_states.shape}")
-        if raw_actions.ndim != 2 or max(arm_action_indices, default=-1) >= raw_actions.shape[1]:
-            raise ValueError(f"Invalid arm-velocity-action-indices for action shape {raw_actions.shape}")
-
-        gripper_state_index = int(settings["gripper-state-index"])
-        gripper_value_index = int(settings["gripper-action-value-index"])
-        gripper_mask_index = int(settings["gripper-action-mask-index"])
-        opened = float(settings["gripper-open-position"])
-        closed = float(settings["gripper-closed-position"])
-        if closed <= opened:
-            raise ValueError("gripper-closed-position must be greater than gripper-open-position")
-        if gripper_state_index >= raw_states.shape[1]:
-            raise ValueError(f"Invalid gripper-state-index for state shape {raw_states.shape}")
-        if max(gripper_value_index, gripper_mask_index) >= raw_actions.shape[1]:
-            raise ValueError(f"Invalid gripper action index for action shape {raw_actions.shape}")
-
-        gripper_state = np.clip((raw_states[:, gripper_state_index] - opened) / (closed - opened), 0.0, 1.0)
-        states = np.zeros((len(raw_states), 8), dtype=np.float32)
-        states[:, :6] = raw_states[:, arm_state_indices]
-        states[:, 7] = gripper_state
-
-        actions = np.zeros((len(raw_actions), 8), dtype=np.float32)
-        actions[:, :6] = raw_actions[:, arm_action_indices]
-        actions[:, 7] = gripper_state
-        commanded = raw_actions[:, gripper_mask_index] > 0.5
-        actions[commanded, 7] = (raw_actions[commanded, gripper_value_index] > 0.0).astype(np.float32)
-        return states, actions
 
     def __len__(self) -> int:
         return int(self._ends[-1])
@@ -401,7 +368,28 @@ def check_vram(settings: dict[str, Any]) -> None:
     print(f"GPU preflight passed: {descriptions}; required: {minimum:.1f} GiB per GPU.")
 
 
-def run_training(settings: dict[str, Any], dataset: UR10eDataset) -> None:
+def _latest_checkpoint_assets(checkpoint_dir: Path, asset_id: str) -> Path | None:
+    if not checkpoint_dir.is_dir():
+        return None
+
+    step_dirs = [
+        path
+        for path in checkpoint_dir.iterdir()
+        if path.is_dir() and path.name.isdigit() and (path / "_CHECKPOINT_METADATA").is_file()
+    ]
+    if not step_dirs:
+        return None
+
+    latest_step = max(step_dirs, key=lambda path: int(path.name))
+    if int(latest_step.name) == 0:
+        return None
+    stats_path = latest_step / "assets" / asset_id / "norm_stats.json"
+    if not stats_path.is_file():
+        raise FileNotFoundError(f"Latest checkpoint is missing normalization statistics: {stats_path}")
+    return latest_step / "assets"
+
+
+def run_training(settings: dict[str, Any], dataset: UR10eDataset, *, use_base_norm_stats: bool) -> None:
     openpi_root = settings["openpi-root"]
     if not (openpi_root / "src" / "openpi").is_dir():
         raise FileNotFoundError(f"OpenPI source tree not found: {openpi_root}")
@@ -414,6 +402,7 @@ def run_training(settings: dict[str, Any], dataset: UR10eDataset) -> None:
         from openpi import transforms
         from openpi.models import pi0_config
         from openpi.policies import droid_policy
+        from openpi.shared import normalize
         from openpi.training import config as openpi_config
         from openpi.training import data_loader
         from openpi.training import optimizer
@@ -439,11 +428,31 @@ def run_training(settings: dict[str, Any], dataset: UR10eDataset) -> None:
     checkpoint = str(settings["base-checkpoint"]).rstrip("/")
     params_path = checkpoint if checkpoint.endswith("/params") else f"{checkpoint}/params"
     checkpoint_root = checkpoint.removesuffix("/params")
+    asset_id = str(settings["pretrained-assets-id"])
+    checkpoint_dir = (
+        settings["checkpoint-base-dir"] / str(settings["config-name"]) / str(settings["experiment-name"])
+    ).resolve()
+    resume_assets = _latest_checkpoint_assets(checkpoint_dir, asset_id) if bool(settings["resume"]) else None
+
+    if resume_assets is not None:
+        assets_dir = str(resume_assets)
+        norm_stats_source = f"resumed checkpoint {resume_assets.parent.name}"
+        dataset_norm_stats = None
+    elif use_base_norm_stats:
+        assets_dir = f"{checkpoint_root}/assets"
+        norm_stats_source = f"base checkpoint {checkpoint_root}"
+        dataset_norm_stats = None
+    else:
+        assets_dir = None
+        stats_path = settings["dataset-path"] / "meta" / "stats.json"
+        dataset_norm_stats = load_projected_stats(stats_path, settings)
+        norm_stats_source = str(stats_path)
+
     data_factory = openpi_config.SimpleDataConfig(
-        repo_id="local/ur10e",
+        repo_id=asset_id,
         assets=openpi_config.AssetsConfig(
-            assets_dir=f"{checkpoint_root}/assets",
-            asset_id=str(settings["pretrained-assets-id"]),
+            assets_dir=assets_dir,
+            asset_id=asset_id,
         ),
         base_config=openpi_config.DataConfig(prompt_from_task=False),
         data_transforms=lambda model_config: transforms.Group(
@@ -489,9 +498,20 @@ def run_training(settings: dict[str, Any], dataset: UR10eDataset) -> None:
         fsdp_devices=int(settings["fsdp-devices"]),
     )
 
+    if dataset_norm_stats is not None:
+        normalize.save(
+            config.assets_dirs / asset_id,
+            {
+                key: normalize.NormStats(**statistics)
+                for key, statistics in dataset_norm_stats.items()
+            },
+        )
+
     original_factory = data_loader.create_torch_dataset
     data_loader.create_torch_dataset = lambda *_args, **_kwargs: dataset
     try:
+        print(f"Using normalization statistics from {norm_stats_source}.")
+
         print(
             f"Starting pi0.5 {method} fine-tuning with {len(dataset):,} frames from episodes {dataset.episode_indexes}."
         )
@@ -518,6 +538,11 @@ def main() -> int:
         action="store_true",
         help="Bypass the documented GPU-memory guard for expert/debug use.",
     )
+    parser.add_argument(
+        "--use-base-norm-stats",
+        action="store_true",
+        help="Use the released DROID checkpoint normalization stats instead of the dataset's projected stats.",
+    )
     args = parser.parse_args()
 
     try:
@@ -540,7 +565,7 @@ def main() -> int:
             return 0
         if not args.skip_vram_check:
             check_vram(settings)
-        run_training(settings, dataset)
+        run_training(settings, dataset, use_base_norm_stats=args.use_base_norm_stats)
         return 0
     except (FileNotFoundError, RuntimeError, ValueError, yaml.YAMLError) as error:
         print(f"Error: {error}", file=sys.stderr)

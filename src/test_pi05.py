@@ -1,13 +1,25 @@
+import os
 from pathlib import Path
 from time import perf_counter
 
 from PIL import Image
 
-from src.init_pi05 import init_pi05
-from src.sim import PI05_CONFIG, get_images, get_proprioception, launch_simulation, step_simulation
+from src.cube_environment import CAMERA_CONFIG
+from src.sim import (
+    PI05_CONFIG,
+    get_images,
+    get_proprioception,
+    get_task_prompt,
+    launch_simulation,
+    step_simulation,
+)
 
 
 def run() -> None:
+    # Load JAX before Isaac Sim starts native worker threads; late loading can break glibc TLS setup.
+    os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+    from src.init_pi05 import init_pi05
+
     model = init_pi05()
     debug_dir = Path(__file__).resolve().parent.parent / "camera_debug"
     debug_dir.mkdir(exist_ok=True)
@@ -26,7 +38,7 @@ def run() -> None:
         if not images or proprioception.size == 0:
             return False
 
-        for camera_name, image in zip(PI05_CONFIG["cameras"], images, strict=True):
+        for camera_name, image in zip(CAMERA_CONFIG["prim_paths"], images, strict=True):
             Image.fromarray(image).save(debug_dir / f"{camera_name}.png")
 
         # pi05_droid expects one unbatched observation with this exact raw format:
@@ -43,7 +55,7 @@ def run() -> None:
             "observation/wrist_image_left": images[1],
             "observation/joint_position": proprioception[:7],
             "observation/gripper_position": proprioception[7:],
-            "prompt": PI05_CONFIG["default_prompt"],
+            "prompt": get_task_prompt(),
         }
         # pi05_droid returns a float array shaped (15, 8): 15 future control steps,
         # with seven joint-velocity commands in columns 0:7 and a gripper-position
