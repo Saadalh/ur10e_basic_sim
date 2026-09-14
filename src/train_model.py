@@ -543,11 +543,47 @@ def main() -> int:
         action="store_true",
         help="Use the released DROID checkpoint normalization stats instead of the dataset's projected stats.",
     )
+    parser.add_argument(
+        "--overwrite",
+        dest="overwrite",
+        action="store_true",
+        default=None,
+        help="Wipe the existing experiment checkpoint directory and start fresh (overrides 'overwrite' in YAML).",
+    )
+    parser.add_argument(
+        "--no-overwrite",
+        dest="overwrite",
+        action="store_false",
+        default=None,
+        help="Do not wipe the existing experiment checkpoint directory (overrides 'overwrite' in YAML).",
+    )
+    parser.add_argument(
+        "--resume",
+        "--continue",
+        dest="resume",
+        action="store_true",
+        default=None,
+        help="Resume from the newest existing checkpoint (--continue is an alias for --resume; overrides 'resume' in YAML).",
+    )
+    parser.add_argument(
+        "--no-resume",
+        "--no-continue",
+        dest="resume",
+        action="store_false",
+        default=None,
+        help="Do not resume from an existing checkpoint (overrides 'resume' in YAML).",
+    )
     args = parser.parse_args()
 
     try:
         config_path = args.config.expanduser().resolve()
         settings = load_settings(config_path)
+        if args.overwrite is not None:
+            settings["overwrite"] = args.overwrite
+        if args.resume is not None:
+            settings["resume"] = args.resume
+        if settings["resume"] and settings["overwrite"]:
+            raise ValueError("resume and overwrite cannot both be true")
         dataset = UR10eDataset(settings["dataset-path"], settings)
         print(
             f"Dataset ready: {len(dataset):,} frames across {len(dataset.episodes)} episodes; "
