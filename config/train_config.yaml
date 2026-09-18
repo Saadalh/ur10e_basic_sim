@@ -37,7 +37,7 @@ minimum-full-vram-gb: 70.0
 # Dataset episode indexes to omit; an empty list keeps every episode.
 ignore-episodes: []
 
-# Number of future actions predicted in each policy chunk.
+# Number of future actions predicted in each policy chunk (1.0 s at 15 Hz).
 action-horizon: 15
 
 # Keep pi0.5's checkpoint-compatible action width; physical actions occupy 8 slots.

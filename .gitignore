@@ -15,7 +15,8 @@ htmlcov/
 
 # Generated robot datasets and model artifacts
 dataset/
-data_1/
+dataset_72/
+dataset_18/
 assets/
 checkpoints/
 wandb/

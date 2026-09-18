@@ -171,10 +171,24 @@ until the finger stalls on the cube and holds that exact position — one
 close, no relative-delta ratcheting (`action_deltas` was removed for this
 reason). Grasp tuning lives under `gripper` (`grasp_increments`,
 `grasp_position_eps`, `grasp_steady_steps`, `grasp_min_travel_fraction`,
-`max_grasp_steps`); start values assume the 0–40 finger range and may need
-adjustment if stall is detected late or never. Transport reuses the Cartesian
-motion with the stall pose merged in, so a held cube is never commanded open
-mid-transport; release still opens once at the place pose.
+`max_grasp_steps`); values are in finger-joint radians matching the training
+calibration (`gripper-open-position` 0.0, `gripper-closed-position` 0.376), and
+a unit test fails if collection calibration ever drifts from it. Transport
+reuses the Cartesian motion with the stall pose merged in, so a held cube is
+never commanded open mid-transport; release still opens once at the place pose.
+
+Simulation, recording, and policy execution share a 15 Hz control rate
+(150 Hz physics, one action per render step), matching the pi0.5/DROID step
+convention so a 15-action chunk always spans one second. Datasets carry their
+rate in `meta/info.json`, and the collector refuses to append to a dataset
+recorded at a different rate — collect 15 Hz data into a fresh dataset root
+rather than extending the older 20 Hz one. If a run is interrupted before the
+first episode saves, only `meta/info.json` exists; the next run detects this
+empty stub and recreates the dataset automatically. A directory that recorded
+episodes but lost `meta/tasks.parquet` is treated as corruption and aborts
+with instructions instead of falling back to the Hub. All Hub access is
+disabled during collection, so local metadata problems fail fast instead of
+surfacing as `401 Repository Not Found` for the local repo id.
 
 Every run writes `collection.log` (per-episode attempts, failures, and the
 full traceback, flushed before simulator shutdown) alongside the terminal

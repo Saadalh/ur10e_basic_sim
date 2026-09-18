@@ -11,7 +11,7 @@
     "root": "dataset",
     "repo_id": "local/ur10e_red_on_blue",
     "robot_type": "ur10e_robotiq_2f_85",
-    "fps": 20,
+    "fps": 15,
     "files_per_chunk": 1000,
     "data_file_size_limit_mb": 100,
     "video_file_size_limit_mb": 200,
@@ -22,8 +22,8 @@
     "streaming_encoding": true
   },
   "simulation": {
-    "physics_hz": 200,
-    "rendering_hz": 20,
+    "physics_hz": 150,
+    "rendering_hz": 15,
     "table_prim_path": "/World/Cube",
     "cube_material_prim_path": "/World/Physics_Materials/cube_material",
     "cube_static_friction": 1.0,
@@ -68,12 +68,12 @@
   "gripper": {
     "joint_prim_names": ["finger_joint"],
     "joint_opened_positions": [0.0],
-    "joint_closed_positions": [40.0],
+    "joint_closed_positions": [0.376],
     "grasp_increments": 40,
-    "grasp_position_eps": 0.25,
+    "grasp_position_eps": 0.005,
     "grasp_steady_steps": 10,
     "grasp_min_travel_fraction": 0.1,
-    "max_grasp_steps": 400,
+    "max_grasp_steps": 300,
     "use_mimic_joints": true
   },
   "cubes": {
@@ -99,13 +99,13 @@
     "end_effector_orientation_degrees": [180.0, 0.0, 0.0],
     "initial_height_clearance": 0.30,
     "position_tolerance": 0.01,
-    "maximum_alignment_steps": 1000,
+    "maximum_alignment_steps": 750,
     "maximum_episode_attempts": 3,
     "pre_grasp_height": 0.20,
     "approach_tolerance": 0.01,
     "descent_step": 0.01,
     "xy_lock_tolerance": 0.01,
-    "max_approach_steps": 2000,
+    "max_approach_steps": 1500,
     "minimum_lift_height": 0.10,
     "maximum_placement_error": 0.02
   },

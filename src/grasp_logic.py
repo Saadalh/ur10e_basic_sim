@@ -42,6 +42,18 @@ def grasp_target(pick_xyz, offset_xyz) -> np.ndarray:
     return pick + offset
 
 
+def ensure_base_pick_state(controller, picking_position) -> None:
+    """Restore the per-episode state the stock controller sets in events 0/1.
+
+    Staged overrides bypass those branches, but the stock transport phases
+    still read ``_current_target_x/_current_target_y`` (blend origin) and
+    ``_h0`` (height base). Call before delegating events 4+ to super().
+    """
+    controller._current_target_x = float(picking_position[0])
+    controller._current_target_y = float(picking_position[1])
+    controller._h0 = float(picking_position[2])
+
+
 def descend_target(current_xyz, goal_xyz, step) -> np.ndarray:
     """Next descent setpoint: x/y snapped to the goal, z stepped toward it.
 
@@ -138,3 +150,58 @@ def merge_gripper_hold(joint_positions, dof_index: int, value: float) -> list:
         merged.extend([None] * (dof_index + 1 - len(merged)))
     merged[dof_index] = float(value)
     return merged
+
+
+def scatter_merged_action(
+    joint_positions,
+    joint_velocities,
+    joint_indices,
+    hold_dof: int,
+    hold_value: float,
+    dof_count: int,
+    joint_efforts=None,
+) -> tuple:
+    """Scatter a subset action into full-width lists with a gripper hold.
+
+    Cartesian controllers return arm positions/velocities paired positionally
+    with arm indices, while the dataset recorder requires every attribute to
+    pair with the same shared indices. Scattering into full-width lists with
+    ``None`` (uncommanded) elsewhere keeps all attributes consistent no
+    matter the subset size or ordering. Commanded efforts are refused loudly
+    rather than silently dropped.
+    """
+    hold_dof = int(hold_dof)
+    dof_count = int(dof_count)
+    if dof_count < 1:
+        raise ValueError(f"dof_count must be at least 1, got {dof_count}")
+    if not 0 <= hold_dof < dof_count:
+        raise ValueError(f"hold_dof {hold_dof} outside [0, {dof_count})")
+    if joint_positions is None:
+        raise ValueError(
+            "cannot merge a gripper hold into an action without joint positions"
+        )
+    if joint_indices is None:
+        joint_indices = list(range(len(joint_positions)))
+    if len(joint_positions) != len(joint_indices):
+        raise ValueError(
+            f"Cartesian action has {len(joint_positions)} positions "
+            f"for {len(joint_indices)} indices"
+        )
+    if joint_velocities is not None and len(joint_velocities) != len(joint_indices):
+        raise ValueError(
+            f"Cartesian action has {len(joint_velocities)} velocities "
+            f"for {len(joint_indices)} indices"
+        )
+    if joint_efforts is not None and any(value is not None for value in joint_efforts):
+        raise ValueError("refusing to drop commanded joint efforts")
+    full_positions: list = [None] * dof_count
+    full_velocities: list = [None] * dof_count
+    for position, index in zip(joint_positions, joint_indices):
+        if not 0 <= int(index) < dof_count:
+            raise ValueError(f"joint index {index} outside [0, {dof_count})")
+        full_positions[int(index)] = position
+    if joint_velocities is not None:
+        for velocity, index in zip(joint_velocities, joint_indices):
+            full_velocities[int(index)] = velocity
+    full_positions[hold_dof] = float(hold_value)
+    return full_positions, full_velocities

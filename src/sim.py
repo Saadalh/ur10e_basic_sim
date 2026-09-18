@@ -100,7 +100,7 @@ def _initialize_robot_controller() -> None:
 
 
 def step_simulation(action_chunk: np.ndarray, chunk_samples: int = 1) -> int:
-    """Apply policy actions with the collection world's 20 Hz render and 200 Hz physics timing."""
+    """Apply policy actions with the collection world's 15 Hz render and 150 Hz physics timing."""
     from isaacsim.core.utils.types import ArticulationAction
 
     if action_chunk.ndim != 2 or action_chunk.shape[1] != 8:

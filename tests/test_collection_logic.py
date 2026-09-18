@@ -13,6 +13,7 @@ and cover the logic that decides whether a randomized scene is attempted:
 - shutdown watchdog (stack dump + forced exit with a recorded code).
 """
 
+import json
 import logging
 import math
 import signal
@@ -21,8 +22,10 @@ import threading
 import unittest
 from itertools import permutations
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+import yaml
 
 from src.collection_runtime import (
     CollectionStopped,
@@ -32,10 +35,13 @@ from src.collection_runtime import (
     close_with_watchdog,
     ensure_encoders_stopped,
     finalize_collection,
+    is_incomplete_dataset_stub,
 )
 from src.cube_environment import (
     COLLECTION_CONFIG,
     CUBE_CONFIG,
+    GRIPPER_CONFIG,
+    PROJECT_ROOT,
     _random_cube_positions,
     build_task_schedule,
     placement_is_clear,
@@ -46,8 +52,10 @@ from src.grasp_logic import (
     approach_target,
     close_step_target,
     descend_target,
+    ensure_base_pick_state,
     grasp_target,
     merge_gripper_hold,
+    scatter_merged_action,
     within_tolerance,
 )
 
@@ -488,6 +496,57 @@ class FinalizeWatchdogTest(unittest.TestCase):
         self.assertEqual(calls, ["stats", "close"])
 
 
+class DatasetStubTest(unittest.TestCase):
+    """A run killed before the first save leaves info.json without tasks.
+
+    Only a stub with zero recorded episodes may be auto-removed; anything
+    else missing tasks.parquet is corruption needing operator attention.
+    """
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.root = Path(self._tmpdir.name) / "dataset"
+
+    def _write_info(self, episodes, frames):
+        meta = self.root / "meta"
+        meta.mkdir(parents=True, exist_ok=True)
+        (meta / "info.json").write_text(
+            json.dumps({"total_episodes": episodes, "total_frames": frames}),
+            encoding="utf-8",
+        )
+
+    def test_missing_root_is_not_a_stub(self):
+        self.assertFalse(is_incomplete_dataset_stub(self.root))
+
+    def test_root_without_info_is_not_a_stub(self):
+        self.root.mkdir(parents=True)
+        self.assertFalse(is_incomplete_dataset_stub(self.root))
+
+    def test_empty_stub_without_tasks_is_detected(self):
+        self._write_info(0, 0)
+        self.assertTrue(is_incomplete_dataset_stub(self.root))
+
+    def test_stub_with_tasks_file_is_a_real_dataset(self):
+        self._write_info(0, 0)
+        (self.root / "meta" / "tasks.parquet").write_bytes(b"stub")
+        self.assertFalse(is_incomplete_dataset_stub(self.root))
+
+    def test_recorded_episodes_without_tasks_is_not_a_stub(self):
+        self._write_info(3, 6120)
+        self.assertFalse(is_incomplete_dataset_stub(self.root))
+
+    def test_frames_without_episodes_is_not_a_stub(self):
+        self._write_info(0, 128)
+        self.assertFalse(is_incomplete_dataset_stub(self.root))
+
+    def test_malformed_info_is_not_a_stub(self):
+        meta = self.root / "meta"
+        meta.mkdir(parents=True, exist_ok=True)
+        (meta / "info.json").write_text("not json{", encoding="utf-8")
+        self.assertFalse(is_incomplete_dataset_stub(self.root))
+
+
 class ScheduleTest(unittest.TestCase):
     def test_selection_is_deterministic(self):
         first = select_episode_schedule(10, seed=42)
@@ -616,6 +675,157 @@ class MergeGripperHoldTest(unittest.TestCase):
     def test_rejects_negative_dof(self):
         with self.assertRaises(ValueError):
             merge_gripper_hold([0.1], -1, 7.0)
+
+
+class ScatterMergedActionTest(unittest.TestCase):
+    """Scattering a subset action into full-width lists must keep positions,
+    velocities, and the shared recorder indices consistent. The previous
+    pair-appending merge produced 7 positions with 6 velocities/indices and
+    crashed recording on the first post-stall frame."""
+
+    def test_scatters_arm_subset_and_pins_hold(self):
+        positions, velocities = scatter_merged_action(
+            [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            [1.1, 1.2, 1.3, 1.4, 1.5, 1.6],
+            [0, 1, 2, 3, 4, 5],
+            hold_dof=6,
+            hold_value=0.3668,
+            dof_count=12,
+        )
+        self.assertEqual(len(positions), 12)
+        self.assertEqual(len(velocities), 12)
+        self.assertEqual(positions[:7], [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.3668])
+        self.assertEqual(velocities[:7], [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, None])
+        self.assertEqual(positions[7:], [None] * 5)
+        # Recorder invariant: indices=None pairs with arange(dof_count).
+        self.assertEqual(len(positions), 12)
+
+    def test_overwrites_hold_dof_already_commanded(self):
+        positions, _ = scatter_merged_action(
+            [0.1, 9.9],
+            None,
+            [0, 6],
+            hold_dof=6,
+            hold_value=0.3668,
+            dof_count=12,
+        )
+        self.assertEqual(positions[6], 0.3668)
+        self.assertEqual(positions[0], 0.1)
+
+    def test_defaults_indices_to_range(self):
+        positions, velocities = scatter_merged_action(
+            [0.1, 0.2], [1.1, 1.2], None, hold_dof=2, hold_value=7.0, dof_count=4
+        )
+        self.assertEqual(positions, [0.1, 0.2, 7.0, None])
+        self.assertEqual(velocities, [1.1, 1.2, None, None])
+
+    def test_mismatched_lengths_raise(self):
+        with self.assertRaises(ValueError):
+            scatter_merged_action(
+                [0.1] * 7,
+                [1.1] * 6,
+                [0, 1, 2, 3, 4, 5],
+                hold_dof=6,
+                hold_value=0.5,
+                dof_count=12,
+            )
+        with self.assertRaises(ValueError):
+            scatter_merged_action(
+                [0.1] * 6,
+                [1.1] * 7,
+                [0, 1, 2, 3, 4, 5],
+                hold_dof=6,
+                hold_value=0.5,
+                dof_count=12,
+            )
+
+    def test_missing_positions_raises(self):
+        with self.assertRaises(ValueError):
+            scatter_merged_action(
+                None, None, [0, 1], hold_dof=6, hold_value=0.5, dof_count=12
+            )
+
+    def test_commanded_efforts_raise(self):
+        with self.assertRaises(ValueError):
+            scatter_merged_action(
+                [0.1],
+                None,
+                [0],
+                hold_dof=6,
+                hold_value=0.5,
+                dof_count=12,
+                joint_efforts=[2.0],
+            )
+
+    def test_rejects_bad_dof_and_out_of_range_index(self):
+        with self.assertRaises(ValueError):
+            scatter_merged_action(
+                [0.1], None, [0], hold_dof=-1, hold_value=0.5, dof_count=12
+            )
+        with self.assertRaises(ValueError):
+            scatter_merged_action(
+                [0.1], None, [0], hold_dof=12, hold_value=0.5, dof_count=12
+            )
+        with self.assertRaises(ValueError):
+            scatter_merged_action(
+                [0.1], None, [99], hold_dof=6, hold_value=0.5, dof_count=12
+            )
+
+
+class GraspCalibrationTest(unittest.TestCase):
+    """The stall detector is only meaningful if its thresholds resolve the
+    real finger range: a past bug tuned them for 0-40 device units while the
+    joint reads radians over 0-0.376, making a stall unreachable."""
+
+    def test_stall_thresholds_resolve_finger_motion(self):
+        opened = float(GRIPPER_CONFIG["joint_opened_positions"][0])
+        closed = float(GRIPPER_CONFIG["joint_closed_positions"][0])
+        span = abs(closed - opened)
+        self.assertGreater(span, 0.0)
+        step = span / int(GRIPPER_CONFIG["grasp_increments"])
+        # A genuinely closing finger must advance more per step than the
+        # steadiness epsilon, or motion reads as stalled immediately.
+        self.assertLess(float(GRIPPER_CONFIG["grasp_position_eps"]), step)
+        # The required travel must fit inside the physical range, or a stall
+        # can never be reported and every grasp times out.
+        self.assertLess(span * float(GRIPPER_CONFIG["grasp_min_travel_fraction"]), span)
+
+    def test_collection_gripper_matches_training_calibration(self):
+        with open(
+            PROJECT_ROOT / "config" / "train_config.yaml", encoding="utf-8"
+        ) as handle:
+            train_config = yaml.safe_load(handle)
+        self.assertAlmostEqual(
+            float(GRIPPER_CONFIG["joint_opened_positions"][0]),
+            float(train_config["gripper-open-position"]),
+            places=3,
+        )
+        self.assertAlmostEqual(
+            float(GRIPPER_CONFIG["joint_closed_positions"][0]),
+            float(train_config["gripper-closed-position"]),
+            places=3,
+        )
+
+
+class EnsureBasePickStateTest(unittest.TestCase):
+    def test_restores_stock_transport_state(self):
+        controller = SimpleNamespace()
+        ensure_base_pick_state(controller, [0.5, -0.2, 1.43])
+        self.assertEqual(controller._current_target_x, 0.5)
+        self.assertEqual(controller._current_target_y, -0.2)
+        self.assertEqual(controller._h0, 1.43)
+
+    def test_stock_interpolation_reads_succeed_after_restore(self):
+        """Mirrors base forward() line 139: blend from pick xy to place xy."""
+        controller = SimpleNamespace()
+        with self.assertRaises(AttributeError):
+            (controller._current_target_x, controller._current_target_y)
+        ensure_base_pick_state(controller, [0.5, -0.2, 1.43])
+        alpha = 0.5
+        xy = (1 - alpha) * np.array(
+            [controller._current_target_x, controller._current_target_y]
+        ) + alpha * np.array([0.8, 0.1])
+        np.testing.assert_allclose(xy, [0.65, -0.05])
 
 
 if __name__ == "__main__":

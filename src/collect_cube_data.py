@@ -1,6 +1,8 @@
 import argparse
 import logging
+import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -12,6 +14,7 @@ from src.collection_runtime import (
     ManipulationFailure,
     StopRequest,
     finalize_collection,
+    is_incomplete_dataset_stub,
 )
 
 from src.cube_environment import (
@@ -169,10 +172,22 @@ def _validate_dataset_compatibility(
 
 def _open_dataset(dataset_class: type, fps: int, dof_names: list[str]) -> object:
     features = _dataset_features(dof_names)
+    if DATASET_ROOT.exists() and is_incomplete_dataset_stub(DATASET_ROOT):
+        print(
+            f"Removing incomplete dataset stub with no saved episodes: {DATASET_ROOT}",
+            flush=True,
+        )
+        shutil.rmtree(DATASET_ROOT)
     if DATASET_ROOT.exists():
         if not (DATASET_ROOT / "meta" / "info.json").is_file():
             raise FileExistsError(
                 f"Refusing to overwrite non-LeRobot dataset directory without meta/info.json: {DATASET_ROOT}"
+            )
+        if not (DATASET_ROOT / "meta" / "tasks.parquet").is_file():
+            raise FileExistsError(
+                f"Dataset at {DATASET_ROOT} is incomplete: meta/tasks.parquet is missing "
+                f"but episodes were recorded. Remove or repair the directory manually; "
+                f"refusing to overwrite recorded data."
             )
         dataset = dataset_class(
             repo_id=DATASET_REPO_ID,
@@ -245,6 +260,10 @@ def main() -> None:
         parser.error("--episodes must be at least 1")
     episode_schedule = select_episode_schedule(args.episodes, args.seed)
     episode_count = len(episode_schedule)
+    # All dataset access in this collector is local (repo_id "local/...").
+    # Offline mode converts any Hub fallback for local metadata problems
+    # into an immediate local error instead of a confusing 401.
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
     max_attempts = int(CONTROLLER_CONFIG.get("maximum_episode_attempts", 3))
     if max_attempts < 1:
         parser.error("maximum_episode_attempts must be at least 1")

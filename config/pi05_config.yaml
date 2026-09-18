@@ -4,12 +4,12 @@ openpi_root: /home/rahmlab/projects/vlas/openpi
 # Registered OpenPI configuration for the inference policy.
 config_name: pi05_droid
 
-# Pretrained checkpoint root; remote paths use OpenPI's local cache.
-checkpoint: gs://openpi-assets/checkpoints/pi05_droid
+# Fine-tuned checkpoint under test; remote paths use OpenPI's local cache.
+checkpoint: /home/rahmlab/projects/isaac_simulations/ur10e_basic/checkpoints/pi05_ur10e_lora/ur10e_cube_tasks/19999
 
 # Fallback instruction outside the simulator; test mode uses the selected collection task.
-default_prompt: 'Move the green cube to the left.'
+default_prompt: 'Move the blue cube forward.'
 
-# Receding-horizon execution at the collection environment's 20 Hz control rate.
+# Receding-horizon execution at the collection environment's 15 Hz control rate.
 steps: 150
 chunk_samples: 1

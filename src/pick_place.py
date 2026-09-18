@@ -33,8 +33,10 @@ from src.grasp_logic import (
     approach_target,
     close_step_target,
     descend_target,
+    ensure_base_pick_state,
     grasp_target,
     merge_gripper_hold,
+    scatter_merged_action,
     within_tolerance,
 )
 
@@ -56,10 +58,10 @@ class StagedPickPlaceController(PickPlaceController):
         xy_lock_tolerance=0.01,
         max_approach_steps=2000,
         grasp_increments=40,
-        grasp_position_eps=0.25,
+        grasp_position_eps=0.005,
         grasp_steady_steps=10,
         grasp_min_travel_fraction=0.1,
-        max_grasp_steps=400,
+        max_grasp_steps=300,
     ):
         super().__init__(
             name=name,
@@ -68,7 +70,6 @@ class StagedPickPlaceController(PickPlaceController):
             events_dt=events_dt,
         )
         self._robot = robot
-        self._gripper = gripper
         self._pre_grasp_height = float(pre_grasp_height)
         self._approach_tolerance = float(approach_tolerance)
         self._descent_step = float(descent_step)
@@ -152,6 +153,7 @@ class StagedPickPlaceController(PickPlaceController):
         if self._event == 3:
             return self._step_grasp()
         if self._event in (4, 5, 6) and self._grasp_hold is not None:
+            ensure_base_pick_state(self, picking_position)
             action = super().forward(
                 picking_position,
                 placing_position,
@@ -159,15 +161,18 @@ class StagedPickPlaceController(PickPlaceController):
                 end_effector_offset,
                 end_effector_orientation,
             )
-            positions = (
-                list(action.joint_positions)
-                if action.joint_positions is not None
-                else [None] * len(self._robot.dof_names)
+            positions, velocities = scatter_merged_action(
+                action.joint_positions,
+                action.joint_velocities,
+                action.joint_indices,
+                hold_dof=self._drive_dof,
+                hold_value=self._grasp_hold,
+                dof_count=len(self._robot.dof_names),
+                joint_efforts=action.joint_efforts,
             )
-            action.joint_positions = merge_gripper_hold(
-                positions, self._drive_dof, self._grasp_hold
+            return ArticulationAction(
+                joint_positions=positions, joint_velocities=velocities
             )
-            return action
         return super().forward(
             picking_position,
             placing_position,
@@ -221,8 +226,7 @@ class StagedPickPlaceController(PickPlaceController):
                 flush=True,
             )
         if self._grasp_hold is not None:
-            if self._event == 3:
-                self._event = 4
+            self._event = 4
             positions = merge_gripper_hold(
                 [None] * len(self._robot.dof_names), self._drive_dof, self._grasp_hold
             )

@@ -1,6 +1,7 @@
 """Collection lifecycle helpers, independent of Isaac Sim."""
 
 import faulthandler
+import json
 import logging
 import os
 import signal
@@ -8,6 +9,7 @@ import sys
 import threading
 import time
 import traceback
+from pathlib import Path
 
 
 class ManipulationFailure(RuntimeError):
@@ -16,6 +18,34 @@ class ManipulationFailure(RuntimeError):
 
 class CollectionStopped(RuntimeError):
     """An orderly stop requested by the operator."""
+
+
+def is_incomplete_dataset_stub(root) -> bool:
+    """Detect a dataset directory left behind before the first episode saved.
+
+    LeRobot writes ``meta/info.json`` at creation but only writes
+    ``meta/tasks.parquet`` on the first ``save_episode()``. A directory with
+    zero recorded episodes and frames and no tasks file therefore holds no
+    data and is safe to remove and recreate. Anything else missing the tasks
+    file is genuine corruption that needs operator attention, and unreadable
+    metadata returns False so the normal open path surfaces the real error.
+    """
+    root = Path(root)
+    info_path = root / "meta" / "info.json"
+    if not root.exists() or not info_path.is_file():
+        return False
+    if (root / "meta" / "tasks.parquet").is_file():
+        return False
+    try:
+        info = json.loads(info_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    try:
+        episodes = int(info.get("total_episodes", 0))
+        frames = int(info.get("total_frames", 0))
+    except (TypeError, ValueError):
+        return False
+    return episodes == 0 and frames == 0
 
 
 class StopRequest:
