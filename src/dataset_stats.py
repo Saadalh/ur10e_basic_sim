@@ -13,48 +13,25 @@ import numpy as np
 import pyarrow.parquet as pq
 import yaml
 
+from src.droid_projection import DROID_ACTION_SCALE, project_controls
+
 RAW_STATE_KEY = "observation.state"
 RAW_ACTION_KEY = "action"
 OPENPI_STATE_KEY = "openpi.state"
 OPENPI_ACTION_KEY = "openpi.actions"
-PROJECTION_VERSION = 1
+PROJECTION_VERSION = 2
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def convert_controls(
     raw_states: np.ndarray, raw_actions: np.ndarray, settings: dict[str, Any]
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Project collected UR10e controls into the 8D DROID-compatible space."""
-    arm_state_indices = settings["arm-state-indices"]
-    arm_action_indices = settings["arm-velocity-action-indices"]
-    if raw_states.ndim != 2 or max(arm_state_indices, default=-1) >= raw_states.shape[1]:
-        raise ValueError(f"Invalid arm-state-indices for state shape {raw_states.shape}")
-    if raw_actions.ndim != 2 or max(arm_action_indices, default=-1) >= raw_actions.shape[1]:
-        raise ValueError(f"Invalid arm-velocity-action-indices for action shape {raw_actions.shape}")
+    """Project collected UR10e controls into the 8D DROID-compatible space.
 
-    gripper_state_index = int(settings["gripper-state-index"])
-    gripper_value_index = int(settings["gripper-action-value-index"])
-    gripper_mask_index = int(settings["gripper-action-mask-index"])
-    opened = float(settings["gripper-open-position"])
-    closed = float(settings["gripper-closed-position"])
-    if closed <= opened:
-        raise ValueError("gripper-closed-position must be greater than gripper-open-position")
-    if gripper_state_index >= raw_states.shape[1]:
-        raise ValueError(f"Invalid gripper-state-index for state shape {raw_states.shape}")
-    if max(gripper_value_index, gripper_mask_index) >= raw_actions.shape[1]:
-        raise ValueError(f"Invalid gripper action index for action shape {raw_actions.shape}")
-
-    gripper_state = np.clip((raw_states[:, gripper_state_index] - opened) / (closed - opened), 0.0, 1.0)
-    states = np.zeros((len(raw_states), 8), dtype=np.float32)
-    states[:, :6] = raw_states[:, arm_state_indices]
-    states[:, 7] = gripper_state
-
-    actions = np.zeros((len(raw_actions), 8), dtype=np.float32)
-    actions[:, :6] = raw_actions[:, arm_action_indices]
-    actions[:, 7] = gripper_state
-    commanded = raw_actions[:, gripper_mask_index] > 0.5
-    actions[commanded, 7] = (raw_actions[commanded, gripper_value_index] > 0.0).astype(np.float32)
-    return states, actions
+    Thin delegate to the canonical :mod:`src.droid_projection`
+    implementation so statistics generation and training can never diverge.
+    """
+    return project_controls(raw_states, raw_actions, settings)
 
 
 class StatsAccumulator:
@@ -106,7 +83,7 @@ def _load_control_settings(config_path: Path) -> dict[str, Any]:
     keys = {
         "arm-state-indices",
         "gripper-state-index",
-        "arm-velocity-action-indices",
+        "arm-position-action-indices",
         "gripper-action-value-index",
         "gripper-action-mask-index",
         "gripper-open-position",
@@ -215,7 +192,8 @@ def generate_dataset_stats(
         "source_action_dimensions": [action_width],
         "action_horizon": [action_horizon],
         "arm_state_indices": list(control_settings["arm-state-indices"]),
-        "arm_velocity_action_indices": list(control_settings["arm-velocity-action-indices"]),
+        "arm_position_action_indices": list(control_settings["arm-position-action-indices"]),
+        "droid_action_scale": [DROID_ACTION_SCALE],
         "gripper_state_index": [int(control_settings["gripper-state-index"])],
         "gripper_action_value_index": [int(control_settings["gripper-action-value-index"])],
         "gripper_action_mask_index": [int(control_settings["gripper-action-mask-index"])],
@@ -252,7 +230,8 @@ def load_projected_stats(path: Path, settings: dict[str, Any]) -> dict[str, dict
         "source_action_dimensions": [action_width],
         "action_horizon": [int(settings["action-horizon"])],
         "arm_state_indices": list(settings["arm-state-indices"]),
-        "arm_velocity_action_indices": list(settings["arm-velocity-action-indices"]),
+        "arm_position_action_indices": list(settings["arm-position-action-indices"]),
+        "droid_action_scale": [DROID_ACTION_SCALE],
         "gripper_state_index": [int(settings["gripper-state-index"])],
         "gripper_action_value_index": [int(settings["gripper-action-value-index"])],
         "gripper_action_mask_index": [int(settings["gripper-action-mask-index"])],

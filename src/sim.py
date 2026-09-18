@@ -15,6 +15,11 @@ from src.cube_environment import (
     CubeEnvironment,
     build_task_schedule,
 )
+from src.droid_projection import (
+    decode_arm_action,
+    denormalize_gripper_position,
+    limit_arm_action,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PI05_CONFIG_PATH = PROJECT_ROOT / "config" / "pi05_config.yaml"
@@ -27,7 +32,8 @@ with TRAIN_CONFIG_PATH.open(encoding="utf-8") as config_file:
 _environment: CubeEnvironment | None = None
 _arm_joint_indices: np.ndarray | None = None
 _gripper_joint_index: int | None = None
-_arm_max_velocities: np.ndarray | None = None
+_arm_joint_lower: np.ndarray | None = None
+_arm_joint_upper: np.ndarray | None = None
 _task_prompt: str | None = None
 
 
@@ -73,7 +79,7 @@ def get_task_prompt() -> str:
 
 
 def _initialize_robot_controller() -> None:
-    global _arm_joint_indices, _gripper_joint_index, _arm_max_velocities
+    global _arm_joint_indices, _gripper_joint_index, _arm_joint_lower, _arm_joint_upper
 
     if _environment is None:
         raise RuntimeError(
@@ -91,10 +97,14 @@ def _initialize_robot_controller() -> None:
 
     controller = robot.get_articulation_controller()
     for joint_index in _arm_joint_indices:
-        controller.switch_dof_control_mode(int(joint_index), "velocity")
+        controller.switch_dof_control_mode(int(joint_index), "position")
     controller.switch_dof_control_mode(_gripper_joint_index, "position")
-    _arm_max_velocities = np.asarray(
-        robot.dof_properties["maxVelocity"][_arm_joint_indices],
+    _arm_joint_lower = np.asarray(
+        robot.dof_properties["lower"][_arm_joint_indices],
+        dtype=np.float32,
+    )
+    _arm_joint_upper = np.asarray(
+        robot.dof_properties["upper"][_arm_joint_indices],
         dtype=np.float32,
     )
 
@@ -113,7 +123,8 @@ def step_simulation(action_chunk: np.ndarray, chunk_samples: int = 1) -> int:
         _environment is None
         or _arm_joint_indices is None
         or _gripper_joint_index is None
-        or _arm_max_velocities is None
+        or _arm_joint_lower is None
+        or _arm_joint_upper is None
     ):
         raise RuntimeError(
             "Robot controller is not initialized; call step_simulation from launch_simulation"
@@ -124,12 +135,25 @@ def step_simulation(action_chunk: np.ndarray, chunk_samples: int = 1) -> int:
     closed = float(TRAIN_CONFIG["gripper-closed-position"])
     controller = _environment.robot.get_articulation_controller()
     for action in action_chunk[:sample_count]:
-        # DROID has seven arm commands; the UR10e uses the first six and drops the synthetic seventh DOF.
-        arm_velocities = np.clip(action[:6], -_arm_max_velocities, _arm_max_velocities)
-        gripper_position = opened + np.clip(action[7], 0.0, 1.0) * (closed - opened)
+        # DROID arm actions are joint-motion commands, not velocities: decode
+        # to an absolute joint-position target executed in position mode.
+        # The UR10e uses the first six and drops the synthetic seventh DOF.
+        arm_action = limit_arm_action(np.asarray(action[:6], dtype=np.float64))
+        current_positions = np.asarray(
+            _environment.robot.get_joint_positions(_arm_joint_indices),
+            dtype=np.float64,
+        )
+        joint_targets = np.clip(
+            decode_arm_action(current_positions, arm_action),
+            _arm_joint_lower,
+            _arm_joint_upper,
+        ).astype(np.float32)
+        gripper_position = np.float32(
+            denormalize_gripper_position(action[7], opened, closed)
+        )
         controller.apply_action(
             ArticulationAction(
-                joint_velocities=arm_velocities, joint_indices=_arm_joint_indices
+                joint_positions=joint_targets, joint_indices=_arm_joint_indices
             )
         )
         controller.apply_action(
@@ -144,7 +168,7 @@ def step_simulation(action_chunk: np.ndarray, chunk_samples: int = 1) -> int:
 
 def launch_simulation(on_step: Callable[[], bool] | None = None) -> None:
     global _environment, _task_prompt
-    global _arm_joint_indices, _gripper_joint_index, _arm_max_velocities
+    global _arm_joint_indices, _gripper_joint_index, _arm_joint_lower, _arm_joint_upper
 
     parser = argparse.ArgumentParser(
         description="Launch the randomized cube environment used for data collection."
@@ -232,4 +256,5 @@ def launch_simulation(on_step: Callable[[], bool] | None = None) -> None:
         _task_prompt = None
         _arm_joint_indices = None
         _gripper_joint_index = None
-        _arm_max_velocities = None
+        _arm_joint_lower = None
+        _arm_joint_upper = None

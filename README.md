@@ -124,6 +124,8 @@ Start fine-tuning from the OpenPI environment on a capable GPU:
 
 By default, the launcher reads the exact 8D `openpi.state` and `openpi.actions` projections from the dataset's `meta/stats.json`. It writes those values to `assets/pi05_ur10e_lora/droid/norm_stats.json` and embeds them in each saved checkpoint as `assets/droid/norm_stats.json`.
 
+The 8D action follows the DROID convention: dimensions 0–5 are normalized joint-motion commands reconstructed as `(commanded_position − observed_position) / 0.2` from the recorded absolute RMPflow position targets, dimension 6 is the synthetic seventh joint (always 0), and dimension 7 is the absolute normalized gripper position. Inference inverts this exactly (`target = current + 0.2 * action`, executed in joint-position mode), applying DROID's vector-level limiting when a predicted action exceeds magnitude 1.
+
 To retain the released pi0.5-DROID checkpoint statistics instead, use:
 
 ```bash

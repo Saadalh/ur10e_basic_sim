@@ -256,7 +256,7 @@ def load_settings(config_path: Path) -> dict[str, Any]:
         "resume",
         "arm-state-indices",
         "gripper-state-index",
-        "arm-velocity-action-indices",
+        "arm-position-action-indices",
         "gripper-action-value-index",
         "gripper-action-mask-index",
         "gripper-open-position",
@@ -295,11 +295,11 @@ def load_settings(config_path: Path) -> dict[str, Any]:
     ):
         if int(settings[key]) < 1:
             raise ValueError(f"{key} must be at least 1")
-    if len(settings["arm-state-indices"]) != 6 or len(settings["arm-velocity-action-indices"]) != 6:
-        raise ValueError("Exactly six arm state and six arm velocity action indexes are required")
+    if len(settings["arm-state-indices"]) != 6 or len(settings["arm-position-action-indices"]) != 6:
+        raise ValueError("Exactly six arm state and six arm position action indexes are required")
     index_keys = (
         "arm-state-indices",
-        "arm-velocity-action-indices",
+        "arm-position-action-indices",
         "gripper-state-index",
         "gripper-action-value-index",
         "gripper-action-mask-index",

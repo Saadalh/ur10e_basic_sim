@@ -58,9 +58,10 @@ def run() -> None:
             "prompt": get_task_prompt(),
         }
         # pi05_droid returns a float array shaped (15, 8): 15 future control steps,
-        # with seven joint-velocity commands in columns 0:7 and a gripper-position
-        # command in column 7. These are policy actions, not absolute joint positions;
-        # the gripper command should be clipped/thresholded as required by the controller.
+        # with six DROID joint-motion commands in columns 0:6, a synthetic
+        # seventh joint in column 6, and an absolute normalized gripper
+        # command in column 7. step_simulation decodes the arm commands to
+        # absolute joint-position targets (q + 0.2 * a).
         inference_start = perf_counter()
         actions = model.infer(observation)
         inference_ms = (perf_counter() - inference_start) * 1000

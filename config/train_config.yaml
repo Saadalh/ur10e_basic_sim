@@ -112,8 +112,9 @@ arm-state-indices: [0, 1, 2, 3, 4, 5]
 # State index containing the primary Robotiq finger joint.
 gripper-state-index: 6
 
-# Raw-action indexes containing the six executable arm velocity commands.
-arm-velocity-action-indices: [24, 25, 26, 27, 28, 29]
+# Raw-action indexes containing the six absolute commanded arm joint positions.
+# The DROID arm action is (commanded - observed) / 0.2 per joint.
+arm-position-action-indices: [0, 1, 2, 3, 4, 5]
 
 # Raw-action index containing the signed gripper position command.
 gripper-action-value-index: 6
