@@ -7,8 +7,17 @@ Tools for generating language-conditioned UR10e and Robotiq 2F-85 demonstrations
 - `ur10e_with_table.usd`: Isaac Sim scene.
 - `main.py`: simulation and simulated-policy inference entry point.
 - `src/collect_cube_data.py`: configurable LeRobot v3 dataset collector.
+- `src/cube_environment.py`: shared simulation scene, randomization, and cameras.
+- `src/collection_runtime.py`: signal handling and collection shutdown helpers.
+- `src/pick_place.py`: staged pick controller (vertical approach, stall-based grasp).
+- `src/grasp_logic.py`: sim-free grasp planning helpers.
+- `src/gripper_debug.py`: gripper-signal recorder, diagnostic plot, and CSV export.
 - `src/dataset_stats.py`: OpenPI-based raw and projected dataset statistics generator.
 - `src/train_model.py`: LeRobot v3 to DROID adapter and OpenPI training launcher.
+- `src/init_pi05.py`: pi0.5-DROID policy loader for simulated inference.
+- `src/sim.py`: shared simulation launcher and policy action execution.
+- `src/test_pi05.py`: simulated pi0.5 rollout runner.
+- `tests/`: sim-free unit tests.
 - `config/ds_collect_config.json`: robot, camera, task, and collection settings.
 - `config/pi05_config.yaml`: pi0.5 inference settings.
 - `config/train_config.yaml`: commented pi0.5 fine-tuning settings.
@@ -134,6 +143,19 @@ To retain the released pi0.5-DROID checkpoint statistics instead, use:
 
 Set `ignore-episodes` in `config/train_config.yaml` to integer episode indexes that should not be used. An empty list keeps every episode. Dataset statistics describe the complete collected dataset; ignored episodes are excluded from training but not from the collection-time statistics. When `resume` is enabled, the launcher preserves the normalization statistics embedded in the newest checkpoint. `--validate-only` does not load normalization statistics.
 
+Training flags (CLI overrides the YAML values shown):
+
+```bash
+/path/to/openpi/.venv/bin/python -m src.train_model --help
+```
+
+- `--config PATH`: use a different training configuration file.
+- `--validate-only`: check data without training.
+- `--skip-vram-check`: bypass the GPU-memory guard.
+- `--use-base-norm-stats`: use released DROID stats instead of dataset stats.
+- `--overwrite` / `--no-overwrite`: wipe or keep the experiment checkpoint directory.
+- `--resume` (`--continue`) / `--no-resume`: resume from the newest checkpoint or start fresh.
+
 ## Generate A Dataset In Isaac Sim
 
 Run this command from the Isaac Lab environment:
@@ -141,6 +163,8 @@ Run this command from the Isaac Lab environment:
 ```bash
 python -m src.collect_cube_data --episodes 10 --seed 42
 ```
+
+Without `--episodes`, the collector records the complete weighted task schedule. `--log-file PATH` selects where `collection.log` is written (default: `collection.log` in the repository root).
 
 Without `--episodes`, the collector records the complete weighted task schedule. Generated datasets are written to `dataset/`, one file per episode by default, and are intentionally excluded from Git. After finalizing the dataset, the collector uses OpenPI's `RunningStats` implementation to replace LeRobot's provisional `meta/stats.json`. The final file contains all 12 raw state dimensions, all 72 raw action dimensions, and exact 8D `openpi.state` and `openpi.actions` projections.
 
@@ -240,6 +264,16 @@ python main.py --test --seed 42 --task-index 0 --episode-index 0
 ```
 
 Test mode uses the same scene construction, dynamic cubes, physics material, robot and gripper wrappers, direct cameras, randomization, settling, and simulation timing as data collection. `--task-index` selects an entry from the configured collection task schedule, while `--episode-index` selects the cube setup variation and offsets the random seed. Use `--tcp-y-sign -1` or `--tcp-y-sign 1` to force the initial end-effector side.
+
+### Gripper Signal Debugging
+
+Append `--plot-gripper` to a test run to record gripper signals for every executed control step:
+
+```bash
+python main.py --test --seed 42 --task-index 0 --episode-index 0 --plot-gripper
+```
+
+At the end of the episode this saves `gripper_debug/task_<task>_episode_<episode>_seed_<seed>.png` (normalized signal with inference-chunk boundaries, physical command vs measured position, tracking error) and a matching `.csv` with per-step samples for later comparison. Without the flag, behavior is unchanged and nothing is recorded. Output goes to `gripper_debug/` next to `camera_debug/`; both directories are excluded from Git.
 
 ## Local Artifacts
 

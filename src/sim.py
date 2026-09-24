@@ -35,6 +35,7 @@ _gripper_joint_index: int | None = None
 _arm_joint_lower: np.ndarray | None = None
 _arm_joint_upper: np.ndarray | None = None
 _task_prompt: str | None = None
+_launch_args = None
 
 
 def get_images() -> tuple[np.ndarray, ...]:
@@ -78,6 +79,11 @@ def get_task_prompt() -> str:
     return _task_prompt
 
 
+def get_launch_args():
+    """Return the parsed launch_simulation() arguments, if available."""
+    return _launch_args
+
+
 def _initialize_robot_controller() -> None:
     global _arm_joint_indices, _gripper_joint_index, _arm_joint_lower, _arm_joint_upper
 
@@ -109,7 +115,12 @@ def _initialize_robot_controller() -> None:
     )
 
 
-def step_simulation(action_chunk: np.ndarray, chunk_samples: int = 1) -> int:
+def step_simulation(
+    action_chunk: np.ndarray,
+    chunk_samples: int = 1,
+    gripper_recorder=None,
+    inference_id: int | None = None,
+) -> int:
     """Apply policy actions with the collection world's 15 Hz render and 150 Hz physics timing."""
     from isaacsim.core.utils.types import ArticulationAction
 
@@ -134,7 +145,7 @@ def step_simulation(action_chunk: np.ndarray, chunk_samples: int = 1) -> int:
     opened = float(TRAIN_CONFIG["gripper-open-position"])
     closed = float(TRAIN_CONFIG["gripper-closed-position"])
     controller = _environment.robot.get_articulation_controller()
-    for action in action_chunk[:sample_count]:
+    for chunk_action_index, action in enumerate(action_chunk[:sample_count]):
         # DROID arm actions are joint-motion commands, not velocities: decode
         # to an absolute joint-position target executed in position mode.
         # The UR10e uses the first six and drops the synthetic seventh DOF.
@@ -148,8 +159,10 @@ def step_simulation(action_chunk: np.ndarray, chunk_samples: int = 1) -> int:
             _arm_joint_lower,
             _arm_joint_upper,
         ).astype(np.float32)
+        raw_gripper_action = float(action[7])
+        clipped_gripper_action = float(np.clip(raw_gripper_action, 0.0, 1.0))
         gripper_position = np.float32(
-            denormalize_gripper_position(action[7], opened, closed)
+            denormalize_gripper_position(clipped_gripper_action, opened, closed)
         )
         controller.apply_action(
             ArticulationAction(
@@ -163,13 +176,23 @@ def step_simulation(action_chunk: np.ndarray, chunk_samples: int = 1) -> int:
             )
         )
         _environment.world.step(render=True)
+        if gripper_recorder is not None:
+            actual_gripper_position = float(
+                _environment.robot.get_joint_positions([_gripper_joint_index])[0]
+            )
+            gripper_recorder.record_sample(
+                inference_id=inference_id,
+                chunk_action_index=chunk_action_index,
+                raw_prediction=raw_gripper_action,
+                clipped_command=clipped_gripper_action,
+                physical_command_rad=float(gripper_position),
+                actual_position_rad=actual_gripper_position,
+            )
     return sample_count
 
 
-def launch_simulation(on_step: Callable[[], bool] | None = None) -> None:
-    global _environment, _task_prompt
-    global _arm_joint_indices, _gripper_joint_index, _arm_joint_lower, _arm_joint_upper
-
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Construct the simulation/test command-line parser (no side effects)."""
     parser = argparse.ArgumentParser(
         description="Launch the randomized cube environment used for data collection."
     )
@@ -195,9 +218,23 @@ def launch_simulation(on_step: Callable[[], bool] | None = None) -> None:
         default=None,
         help="Override the initial end-effector base-frame y side.",
     )
+    parser.add_argument(
+        "--plot-gripper",
+        action="store_true",
+        help="Record gripper signals during pi0.5 test rollouts and save a diagnostic plot.",
+    )
     AppLauncher.add_app_launcher_args(parser)
     parser.set_defaults(experience=PATH_CONFIG["isaac_experience"])
+    return parser
+
+
+def launch_simulation(on_step: Callable[[], bool] | None = None) -> None:
+    global _environment, _task_prompt, _launch_args
+    global _arm_joint_indices, _gripper_joint_index, _arm_joint_lower, _arm_joint_upper
+
+    parser = build_arg_parser()
     args = parser.parse_args()
+    _launch_args = args
     if args.episode_index < 0:
         parser.error("--episode-index must be non-negative")
 
@@ -258,3 +295,6 @@ def launch_simulation(on_step: Callable[[], bool] | None = None) -> None:
         _gripper_joint_index = None
         _arm_joint_lower = None
         _arm_joint_upper = None
+        # NOTE: _launch_args is intentionally not reset so the test path can
+        # still read run metadata (flag, indices, seed) for debug finalization
+        # after launch_simulation() returns.

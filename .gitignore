@@ -23,6 +23,7 @@ wandb/
 
 # Runtime captures and logs
 camera_debug/
+gripper_debug/
 *.log
 
 # Local editor and operating-system files
