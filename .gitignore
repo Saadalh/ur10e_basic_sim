@@ -14,7 +14,7 @@ __pycache__/
 htmlcov/
 
 # Generated robot datasets and model artifacts
-dataset/
+dataset*/
 dataset_72/
 dataset_18/
 assets/

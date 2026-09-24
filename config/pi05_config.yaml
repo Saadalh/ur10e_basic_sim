@@ -11,5 +11,5 @@ checkpoint: /home/rahmlab/projects/isaac_simulations/ur10e_basic/checkpoints/pi0
 default_prompt: 'Move the blue cube forward.'
 
 # Receding-horizon execution at the collection environment's 15 Hz control rate.
-steps: 150
+steps: 5000
 chunk_samples: 1
