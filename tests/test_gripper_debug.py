@@ -19,6 +19,7 @@ from src.gripper_debug import (
     GripperDebugRecorder,
     _silence_matplotlib_logging,
     debug_filename,
+    restore_matplotlib_logging,
     write_gripper_csv,
 )
 
@@ -49,7 +50,7 @@ class FilenameTest(unittest.TestCase):
         previous = matplotlib_logger.level
         matplotlib_logger.setLevel(logging.DEBUG)
         try:
-            _silence_matplotlib_logging()
+            previous_levels = _silence_matplotlib_logging()
             self.assertEqual(matplotlib_logger.level, logging.WARNING)
             # Child inherits: font-matching DEBUG lines are suppressed.
             self.assertEqual(font_manager_logger.getEffectiveLevel(), logging.WARNING)
@@ -59,7 +60,23 @@ class FilenameTest(unittest.TestCase):
                 logging.getLogger().getEffectiveLevel(),
             )
         finally:
+            restore_matplotlib_logging(previous_levels)
             matplotlib_logger.setLevel(previous)
+
+    def test_silencing_suppresses_explicit_child_level(self):
+        # Even if the child logger was explicitly set to DEBUG (e.g. by
+        # third-party code after our call), re-silencing must win.
+        child = logging.getLogger("matplotlib.font_manager")
+        child.setLevel(logging.DEBUG)
+        self.addCleanup(child.setLevel, logging.NOTSET)
+        previous_levels = _silence_matplotlib_logging()
+        try:
+            self.assertEqual(child.getEffectiveLevel(), logging.WARNING)
+            self.assertFalse(child.isEnabledFor(logging.DEBUG))
+        finally:
+            restore_matplotlib_logging(previous_levels)
+        # Pre-call state (explicit DEBUG) is restored untouched.
+        self.assertEqual(child.level, logging.DEBUG)
 
     def test_deterministic_stem(self):
         self.assertEqual(debug_filename(0, 0, 42), "task_0_episode_0_seed_42")

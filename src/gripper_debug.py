@@ -129,22 +129,37 @@ def write_gripper_csv(samples: list[dict], csv_path: Path | str) -> Path:
     return csv_path
 
 
-def _silence_matplotlib_logging() -> None:
+def _silence_matplotlib_logging() -> dict[str, int | None]:
     """Keep matplotlib's font-matching chatter out of the rollout console.
 
     The sim process runs with a DEBUG-level root logger, which matplotlib's
     ``font_manager`` inherits, dumping one line per system font at plot
-    time. Restricting matplotlib's own namespace to WARNING leaves every
-    other logger untouched.
+    time. Both the ``matplotlib`` namespace and the ``font_manager`` child
+    are restricted to WARNING (covers a child with an explicitly set level
+    too); every other logger is untouched. Returns prior levels for
+    restoration by :func:`restore_matplotlib_logging`.
     """
-    logging.getLogger("matplotlib").setLevel(logging.WARNING)
+    loggers = (
+        logging.getLogger("matplotlib"),
+        logging.getLogger("matplotlib.font_manager"),
+    )
+    previous = {logger.name: logger.level for logger in loggers}
+    for logger in loggers:
+        logger.setLevel(logging.WARNING)
+    return previous
+
+
+def restore_matplotlib_logging(previous: dict[str, int | None]) -> None:
+    """Restore logger levels saved by :func:`_silence_matplotlib_logging`."""
+    for name, level in previous.items():
+        logging.getLogger(name).setLevel(level)
 
 
 def write_gripper_plot(
     samples: list[dict], chunk_boundaries: list[int], png_path: Path | str
 ) -> Path:
     """Render the three-panel gripper diagnostic PNG (Agg backend, no window)."""
-    _silence_matplotlib_logging()
+    previous_levels = _silence_matplotlib_logging()
     import matplotlib
 
     matplotlib.use("Agg")
@@ -193,6 +208,9 @@ def write_gripper_plot(
 
     plt.tight_layout()
     png_path = Path(png_path)
-    plt.savefig(png_path, dpi=150)
-    plt.close()
+    try:
+        plt.savefig(png_path, dpi=150)
+    finally:
+        plt.close()
+        restore_matplotlib_logging(previous_levels)
     return png_path

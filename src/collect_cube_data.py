@@ -400,7 +400,7 @@ def main() -> None:
                 f"{'positive' if tcp_y_sign > 0 else 'negative'} initial TCP y",
                 flush=True,
             )
-            print(f"Task: {task_description}", flush=True)
+            print(f"\nTask: {task_description}\n", flush=True)
             print(
                 f"Cube setup variation {cube_setup_variation}: all cubes require base-frame x > 0; "
                 f"{positive_y_cube_count} require y > 0 and {negative_y_cube_count} require y < 0.",

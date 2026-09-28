@@ -254,7 +254,7 @@ def launch_simulation(on_step: Callable[[], bool] | None = None) -> None:
             first_tcp_y_sign if args.episode_index % 2 == 0 else -first_tcp_y_sign
         )
 
-    print(f"Task: {_task_prompt}", flush=True)
+    print(f"\nTask: {_task_prompt}\n", flush=True)
     print(
         f"Test episode index {args.episode_index}, seed {episode_seed}, "
         f"{'positive' if tcp_y_sign > 0 else 'negative'} initial TCP y",
